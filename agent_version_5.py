@@ -3,7 +3,7 @@ import random
 import numpy as np
 from collections import deque
 from game2 import SnakeGameAI, Direction, Point
-from DQNmodel import DQN, QTrainer
+from model_version_3 import Atarimodel, QTrainer
 from helper import plot
 import matplotlib.pyplot as plt
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -22,7 +22,7 @@ class Agent:
         self.epsilon_decay = 0.00001
         self.gamma = 0.9 # discount rate
         self.memory = deque(maxlen=MAX_MEMORY) # popleft()
-        self.model = DQN()
+        self.model = Atarimodel()
         self.trainer = QTrainer(self.model, lr=LR, gamma=self.gamma, device=device)
         self.frames = deque(maxlen = 4)
         for i in range(4):
