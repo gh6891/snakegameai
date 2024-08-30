@@ -9,22 +9,23 @@ import matplotlib.pyplot as plt
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print("Using device:", device)
 
-MAX_MEMORY = 100_000
-BATCH_SIZE = 1000
+MAX_MEMORY = 100_00
+BATCH_SIZE = 32
 LR = 0.001
 
 class Agent:
 
     def __init__(self):
         self.n_games = 0
-        self.epsilon = 0.9 # randomness
+        self.epsilon = 1.0 # randomness
         self.epsilon_min = 0.1
-        self.epsilon_decay = 0.00001
+        self.epsilon_decay = (1.0 - self.epsilon_min) / 1000000
         self.gamma = 0.9 # discount rate
         self.memory = deque(maxlen=MAX_MEMORY) # popleft()
         self.model = Atarimodel()
         self.trainer = QTrainer(self.model, lr=LR, gamma=self.gamma, device=device)
         self.frames = deque(maxlen = 4)
+        self.step_count = 0
         for i in range(4):
             self.frames.append(np.zeros((84, 84)))
 
@@ -34,13 +35,13 @@ class Agent:
         # 4 * 84 * 84로반환 해야함
 
         new_frame=game.get_downsampled_image() # 3*84*84
+        # print(type(new_frame))
         new_frame=np.dot(new_frame[...,:3], [0.2989, 0.5870, 0.1140])#grayscale변환
+        new_frame = np.transpose(new_frame)
         plt.imsave("new_frame.png", new_frame, cmap='gray')
         # print("new_frame.shape : ",new_frame.shape)
         self.frames.append(new_frame)
         state = np.stack(self.frames, axis= 0)
-        # print("state.shape : ",state.shape)
-        # print(state[3])
         # state = torch.tensor(state, dtype=torch.float32).to(device)
         return state
 
@@ -62,8 +63,13 @@ class Agent:
         self.trainer.train_step(state, action, reward, next_state, done, device)
 
     def get_action(self, state):
-        # random moves: tradeoff exploration / exploitation
-        self.epsilon = max(self.epsilon_min, self.epsilon - self.epsilon_decay)
+        self.step_count += 1
+
+        if self.step_count < 1000000:
+            self.epsilon = max(self.epsilon_min, self.epsilon - self.epsilon_decay)
+            print(self.epsilon)
+        else:
+            self.epsilon = 0.1
         final_move = [0,0,0]
 
         if random.random() < self.epsilon:
@@ -74,7 +80,7 @@ class Agent:
             prediction = self.model(state0)
             
             move = torch.argmax(prediction).item()
-
+        
         final_move[move] = 1
 
         return final_move
