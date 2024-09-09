@@ -9,8 +9,8 @@ import matplotlib.pyplot as plt
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print("Using device:", device)
 
-MAX_MEMORY = 100_00
-BATCH_SIZE = 32
+MAX_MEMORY = 100_000
+BATCH_SIZE = 64
 LR = 0.001
 
 class Agent:
