@@ -6,26 +6,36 @@ from game2 import SnakeGameAI, Direction, Point
 from model_version_3 import Atarimodel, QTrainer
 from helper import plot
 import matplotlib.pyplot as plt
+import math
+import torch
+import torch.nn as nn
+import torch.optim as optim
+
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print("Using device:", device)
 
-MAX_MEMORY = 100_000
-BATCH_SIZE = 64
-LR = 0.001
+MAX_MEMORY = 10000
+BATCH_SIZE = 128
+LR = 1e-4
 
 class Agent:
 
     def __init__(self):
         self.n_games = 0
-        self.epsilon = 1.0 # randomness
-        self.epsilon_min = 0.1
-        self.epsilon_decay = (1.0 - self.epsilon_min) / 1000000
-        self.gamma = 0.9 # discount rate
+        self.epsilon = 0.9 # randomness
+        self.epsilon_min = 0.05
+        self.epsilon_decay = 1000
+        self.gamma = 0.99 # discount rate
         self.memory = deque(maxlen=MAX_MEMORY) # popleft()
-        self.model = Atarimodel()
-        self.trainer = QTrainer(self.model, lr=LR, gamma=self.gamma, device=device)
+        self.model = Atarimodel().to(device)
+        self.target = Atarimodel().to(device)
+        self.target.load_state_dict(self.model.state_dict())
+        self.optimizer = optim.AdamW(self.model.parameters(), lr=LR, amsgrad=True)
+        self.trainer = QTrainer(self.model, self.target, lr=LR, gamma=self.gamma, device=device)
         self.frames = deque(maxlen = 4)
         self.step_count = 0
+        self.TAU = 0.005
+
         for i in range(4):
             self.frames.append(np.zeros((84, 84)))
 
@@ -62,17 +72,17 @@ class Agent:
     def train_short_memory(self, state, action, reward, next_state, done):
         self.trainer.train_step(state, action, reward, next_state, done, device)
 
+
+
     def get_action(self, state):
-        self.step_count += 1
 
-        if self.step_count < 1000000:
-            self.epsilon = max(self.epsilon_min, self.epsilon - self.epsilon_decay)
-            print(self.epsilon)
-        else:
-            self.epsilon = 0.1
         final_move = [0,0,0]
+        self.step_count += 1
+        sample = random.random()
+        eps_threshold = self.epsilon_min + (self.epsilon - self.epsilon_min) * math.exp(-1. * self.step_count / self.epsilon_decay)
 
-        if random.random() < self.epsilon:
+
+        if sample < eps_threshold:
             move = random.randint(0, 2)
         else:
             state0 = torch.tensor(state, dtype=torch.float).unsqueeze(0).to(device)
@@ -84,6 +94,7 @@ class Agent:
         final_move[move] = 1
 
         return final_move
+
 
     def compute_loss(model, replay_buffer, batch_size, gamma, device=device):
         state, action, reward, next_state, done = replay_buffer.sample(batch_size)
@@ -108,7 +119,7 @@ class Agent:
 
 
 
-    def train_on_minibatch(self):
+    def optimize_model(self):
         if len(self.memory) < BATCH_SIZE:
             return
         
@@ -119,31 +130,34 @@ class Agent:
         # print(len(states))  # 리스트 길이 확인
         # print(type(states[0]))  # 각 항목의 타입 확인
         # print(len(states[0]))  # 각 항목의 길이 확인
+        
         states = torch.tensor(states, dtype=torch.float32).to(device)
         next_states = torch.tensor(next_states, dtype=torch.float32).to(device)
         actions = torch.tensor(actions, dtype=torch.long).to(device)
         rewards = torch.tensor(rewards, dtype=torch.float32).to(device)
         dones = torch.tensor(dones, dtype=torch.float32).to(device)
-        
-        self.trainer.train_step(states, actions, rewards, next_states, dones, device)
+    
+        state_action_values = self.model(states).gather(1, actions)
 
+        with torch.no_grad():
+            next_state_values = self.target(next_states).max(1)[0]
+        next_state_values = next_state_values * (1 - dones)
+        expected_state_action_values = (next_state_values * self.gamma) + rewards
+        # with torch.no_grad():
+        #     next_state_values[non_final_mask] = self.target(non_final_next_states).max(1).values
+        # with torch.no_grad():
+        #     next_state_values[]
+        # expected_state_action_values = (next_state_values * self.gamma) + rewards
 
+        criterion = nn.SmoothL1Loss()
+        loss = criterion(state_action_values, expected_state_action_values.unsqueeze(1))
 
-        # Q(s, a)
-        # #q_values = [batch_size, num_actions]
-        # q_values = self.model(states)
-        # q_values = q_values.gather(1, actions.unsqueeze(-1)).squeeze(-1)
-
-        # # max Q(s', a') for next state
-        # next_q_values = self.model(next_states).max(1)[0]
-
-        # expected_q_values = rewards + self.gamma * next_q_values * (1 - dones)
-
-        # # Loss
-        # loss = self.trainer.criterion(q_values, expected_q_values.detach())
-        # self.trainer.optimizer.zero_grad()
-        # loss.backward()
-        # self.trainer.optimizer.step()
+            # 모델 최적화
+        self.optimizer.zero_grad()
+        loss.backward()
+        # 변화도 클리핑 바꿔치기
+        torch.nn.utils.clip_grad_value_(self.model.parameters(), 100)
+        self.optimizer.step()
 
 def train():
     plot_scores = []
@@ -151,22 +165,26 @@ def train():
     total_score = 0
     record = 0
     agent = Agent()
-    game = SnakeGameAI()
+    game = SnakeGameAI(render_mode= False)
     
     while True:
         state_old = agent.get_state(game)
         final_move = agent.get_action(state_old)
         reward, done, score = game.play_step(final_move)
         state_new = agent.get_state(game)
+        # if done:
+        #     state_new = None
+        # else:
+        #     state_new = agent.get_state(game)
+
         # trainer 클래스 활용
-        agent.train_short_memory(state_old, final_move, reward, state_new, done)
+        # agent.train_short_memory(state_old, final_move, reward, state_new, done)
         agent.remember(state_old, final_move, reward, state_new, done)
 
         if done:
             game.reset()
             agent.n_games += 1
             #현재있는 함수활용
-            agent.train_on_minibatch()
 
             if score > record:
                 record = score
@@ -179,6 +197,13 @@ def train():
             mean_score = total_score / agent.n_games
             plot_mean_scores.append(mean_score)
             plot(plot_scores, plot_mean_scores)
+        agent.optimize_model()
+
+        target_state_dict = agent.target.state_dict()
+        model_state_dict = agent.model.state_dict()
+        for key in model_state_dict:
+            target_state_dict[key] = model_state_dict[key] * agent.TAU + target_state_dict[key]*(1-agent.TAU)
+        agent.target.load_state_dict(target_state_dict)
 # def play():
 #     plot_scores = []
 #     plot_mean_scores = []

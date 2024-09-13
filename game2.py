@@ -27,13 +27,14 @@ SPEED = 20
 
 class SnakeGameAI:
 
-    def __init__(self, w=840, h=840, num_foods=20):
+    def __init__(self, w=840, h=840, num_foods=20, render_mode =True):
         self.w = w
         self.h = h
         self.num_foods = num_foods  # Number of food items
         # init display
-        self.display = pygame.display.set_mode((self.w, self.h))
-        pygame.display.set_caption('Snake')
+        if render_mode:
+            self.display = pygame.display.set_mode((self.w, self.h))
+            pygame.display.set_caption('Snake')
         self.clock = pygame.time.Clock()
         self.reset()
 
