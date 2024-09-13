@@ -126,21 +126,28 @@ class Agent:
         minibatch = random.sample(self.memory, BATCH_SIZE)
         states, actions, rewards, next_states, dones = zip(*minibatch)
         
-        # print(type(states))  # 리스트인지 확인
-        # print(len(states))  # 리스트 길이 확인
-        # print(type(states[0]))  # 각 항목의 타입 확인
-        # print(len(states[0]))  # 각 항목의 길이 확인
-        
+        # print("1",type(states))  # 리스트인지 확인
+        # print("2",len(states))  # 리스트 길이 확인
+        # print("3",type(states[0]))  # 각 항목의 타입 확인
+        # print("4",len(states[0]))  # 각 항목의 길이 확인
+
+        states = np.array(states)
+        next_states = np.array(next_states)
+
+        # print("1",type(states))  # 리스트인지 확인
+        # print("2",len(states))  # 리스트 길이 확인
+        # print("3",type(states[0]))  # 각 항목의 타입 확인
+        # print("4",len(states[0]))  # 각 항목의 길이 확인
+        # print("5", states.shape)
         states = torch.tensor(states, dtype=torch.float32).to(device)
         next_states = torch.tensor(next_states, dtype=torch.float32).to(device)
         actions = torch.tensor(actions, dtype=torch.long).to(device)
         rewards = torch.tensor(rewards, dtype=torch.float32).to(device)
         dones = torch.tensor(dones, dtype=torch.float32).to(device)
-    
-        state_action_values = self.model(states).gather(1, actions)
-
+        actions_indices = actions.argmax(dim=1).unsqueeze(1)
+        state_action_values = self.model(states).gather(1, actions_indices) # (128, 3)
         with torch.no_grad():
-            next_state_values = self.target(next_states).max(1)[0]
+            next_state_values = self.target(next_states).max(1)[0] # 128
         next_state_values = next_state_values * (1 - dones)
         expected_state_action_values = (next_state_values * self.gamma) + rewards
         # with torch.no_grad():
@@ -150,8 +157,8 @@ class Agent:
         # expected_state_action_values = (next_state_values * self.gamma) + rewards
 
         criterion = nn.SmoothL1Loss()
+        #이 아래에서 문제 발생
         loss = criterion(state_action_values, expected_state_action_values.unsqueeze(1))
-
             # 모델 최적화
         self.optimizer.zero_grad()
         loss.backward()
@@ -165,7 +172,7 @@ def train():
     total_score = 0
     record = 0
     agent = Agent()
-    game = SnakeGameAI(render_mode= False)
+    game = SnakeGameAI(render_mode= True)
     
     while True:
         state_old = agent.get_state(game)
@@ -216,3 +223,9 @@ def train():
 
 if __name__ == '__main__':
     train()
+    # fake = np.zeros((128,4,84,84)) # (1, 4, 84, 84)
+    # print(fake.shape)
+    # fake = torch.tensor(fake, dtype=torch.float32)
+    # model = Atarimodel()
+    # out = model(fake)
+    # print(out)
